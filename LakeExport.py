@@ -65,7 +65,10 @@ done = []
 ## what's already run. 
 pr = [i for i in pr if i not in done]
 
-for tiles in pr[0:3]:
+if not os.path.isfile('log.txt'):
+    open('log.txt', 'x')
+
+for tiles in pr[0:1]:
     tile = wrs.filterMetadata('PR', 'equals', tiles)
     # For some reason we need to cast this to a list and back to a
     # feature collection
@@ -78,14 +81,18 @@ for tiles in pr[0:3]:
     dataOut = ee.batch.Export.table.toDrive(collection = out,\
                                             description = str(tiles),\
                                             folder = 'EE_TempPull',\
-                                            fileFormat = 'csv')#,\
-                                            #selectors = [])
-    #Check how many existing tasks are running and take a break if it's >15  
+                                            fileFormat = 'csv',\
+                                            selectors = ["system:index", "areakm", "cScore_clouds", "CLOUD_COVER", 'SPACECRAFT_ID', 'DATE_ACQUIRED', "distance", "lake_mix_layer_temperature", "lake_total_layer_temperature", "pCount_water", "site_id", "temp", "temp_qa"])
+    #Check how many existing tasks are running and take a break if it's >15
     maximum_no_of_tasks(25, 120)
     #Send next task.
     dataOut.start()
     counter = counter + 1
     done.append(tiles)
+    f = open('log.txt', 'a')
+    f.write(str(tiles) + '\n')
+    f.close()
+
     print('done_' + str(counter) + '_' + str(tiles))
         
 #%%

@@ -47,8 +47,7 @@ def dpBuff(i):
 def removeGeo(i):
     return i.setGeometry(None)
 
-
-## Create water mask and extract lake medians
+        ## Create water mask and extract lake medians
 
 ## Set up the reflectance pull
 def RefPull(image):
@@ -56,12 +55,17 @@ def RefPull(image):
     water = f.eq(1).rename('water')
     clouds = f.gte(2).rename('clouds')
     #hs = CalcHillShadows(image, tile.geometry()).select('hillShadow')
-    #era5match = (ee.Image(era5.filterDate(ee.Date(image.get('system:time_start')).update(minute = 0, second = 0))
-    #             .first()).select('lake_mix_layer_temperature', 'lake_total_layer_temperature'))
-    era5match = ee.Image(0).rename('lake_mix_layer_temperature').addBands(ee.Image(1).rename('lake_total_layer_temperature'))
-    pixOut = (image
-              .addBands(era5match)
+    era5match = (era5.filterDate(ee.Date(image.get('system:time_start')).update(None, None, None, None, 0,0)))
+
+    era5out = (ee.Algorithms.If(era5match.size(),
+                     ee.Image(era5match.first()).select('lake_mix_layer_temperature', 'lake_total_layer_temperature'),
+                     ee.Image(0).rename('lake_mix_layer_temperature').addBands(ee.Image(0).rename('lake_total_layer_temperature')),
+                     )
+               )
+
+    pixOut = (image.select('temp', 'temp_qa')
               .updateMask(water)
+              .addBands(era5out)
               .addBands(clouds)
               .addBands(water))
 
@@ -70,12 +74,16 @@ def RefPull(image):
         .combine(ee.Reducer.mean().unweighted().forEachBand(pixOut.select('clouds')), 'cScore_', False)
         .combine(ee.Reducer.count().unweighted().forEachBand(pixOut.select('water')), 'pCount_', False))
 
+    def copyMeta(i):
+        return i.copyProperties(image, ["CLOUD_COVER", 'SPACECRAFT_ID', 'system:index', 'DATE_ACQUIRED'])
 
-    # Collect median reflectance and occurance values
+
+        # Collect median reflectance and occurance values
     # Make a cloud score, and get the water pixel count
     lsout = pixOut.reduceRegions(lakes, combinedReducer, 30)
 
     out = lsout.map(removeGeo)
+    out = out.map(copyMeta)
 
     return out
 
