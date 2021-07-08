@@ -22,7 +22,7 @@ def AddFmask(image):
              .where(cloudshadow.gt(0), ee.Image(2))
              .where(cloud.gt(0), ee.Image(4))
              .updateMask(qa.gte(0)))
-    # mask the fmask so that it has the same footprint as the quality (BQA) band
+    ## mask the fmask so that it has the same footprint as the quality (BQA) band
     return image.addBands(fmask)
 
 
@@ -33,10 +33,6 @@ def dpBuff(i):
     buffdist = ee.Number(dist).min(120)
     return i.buffer(buffdist)
 
-
-## Remove geometries
-def removeGeo(i):
-    return i.setGeometry(None)
 
 
 ## Set up the reflectance pull
@@ -66,10 +62,12 @@ def RefPull(image):
 
     def copyMeta(i):
         return i.copyProperties(image, ["CLOUD_COVER", 'SPACECRAFT_ID', 'system:index', 'DATE_ACQUIRED'])
+    
+    ## Remove geometries
+    def removeGeo(i):
+        return i.setGeometry(None)
 
-
-        # Collect median reflectance and occurance values
-    # Make a cloud score, and get the water pixel count
+    # Collect reflectance values, cloud score, and pixel counts
     lsout = pixOut.reduceRegions(lakes, combinedReducer, 30)
 
     out = lsout.map(removeGeo)
@@ -78,11 +76,11 @@ def RefPull(image):
     return out
 
 
-##Function for limiting the max number of tasks sent to
-# earth engine at one time to avoid time out errors
+## Function for limiting the max number of tasks sent to
+## earth engine at one time to avoid time out errors
 
 def maximum_no_of_tasks(MaxNActive, waitingPeriod):
-    ##maintain a maximum number of active tasks
+    ## maintain a maximum number of active tasks
     time.sleep(10)
     ## initialize submitting jobs
     ts = list(ee.batch.Task.list())
@@ -94,7 +92,7 @@ def maximum_no_of_tasks(MaxNActive, waitingPeriod):
     ## wait if the number of current active tasks reach the maximum number
     ## defined in MaxNActive
     while (NActive >= MaxNActive):
-        time.sleep(waitingPeriod)  # if reach or over maximum no. of active tasks, wait for 2min and check again
+        time.sleep(waitingPeriod) 
         ts = list(ee.batch.Task.list())
         NActive = 0
         for task in ts:

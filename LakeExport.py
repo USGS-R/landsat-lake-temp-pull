@@ -3,28 +3,25 @@
 """
 @author: simontopp
 """
-#%%
+
 import time
 import ee
 import os
-#import pandas as pd
-#import feather
 
 ## Initialize Earth Engine
 ee.Initialize()
 
-#Source necessary functions. We do this instead of 'import' because of EE quirk.
+## Source necessary functions. We do this instead of 'import' because of EE quirk.
 exec(open('GEE_pull_functions.py').read())
 
-#water = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select('occurrence').gt(80)
-
 ## Bring in EE Assets
-# Deepest point for CONUS PGDL Lakes
-# DP Code available at https://zenodo.org/record/4136755#.X5d54pNKgUE
+## Deepest point (Chebyshev center) for CONUS PGDL Lakes
+## DP Code available at https://zenodo.org/record/4136755#.X5d54pNKgUE and
+## https://code.earthengine.google.com/8dac409b220bdfb051bb469bc5b3c708
 dp = (ee.FeatureCollection('users/sntopp/USGS/PGDL_lakes_deepest_point')
   .filterMetadata('distance', "greater_than", 60))
 
-#CONUS Boundary
+## CONUS Boundary
 us = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")\
     .filterMetadata('country_na', 'equals', 'United States')
 
@@ -32,16 +29,17 @@ us = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")\
 wrs = ee.FeatureCollection('users/sntopp/wrs2_asc_desc')\
     .filterBounds(us)\
     .filterMetadata('MODE', 'equals', 'D')
-    
+
+## Run everything by path/row to speed up computation in EE.    
 pr = wrs.aggregate_array('PR').getInfo()
 
-#Bring in temp data
+## Bring in temp data
 l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
 era5 = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
 
-#Standardize band names between the various collections and aggregate 
-#them into one image collection
+## Standardize band names between the various collections and aggregate 
+## them into one image collection
 bn8 = ['ST_B10', 'ST_QA', 'QA_PIXEL']
 bn57 = ['ST_B6', 'ST_QA', 'QA_PIXEL']
 bns = ['temp','temp_qa','pixel_qa']
@@ -49,7 +47,7 @@ bns = ['temp','temp_qa','pixel_qa']
 ls7 = l7.select(bn57, bns)
 ls8 = l8.select(bn8, bns)
 
-##Do coarse cloud filtering
+## Do coarse cloud filtering
 ls = ee.ImageCollection(ls7.merge(ls8))\
     .filter(ee.Filter.lt('CLOUD_COVER', 50))\
     .filterBounds(us)  
@@ -71,12 +69,10 @@ pr = [i for i in pr if i not in done]
 
 for tiles in pr:
     tile = wrs.filterMetadata('PR', 'equals', tiles)
-    # For some reason we need to cast this to a list and back to a
-    # feature collection
+    
     lakes = dp.filterBounds(tile.geometry())\
         .map(dpBuff)
         
-    #lakes = ee.FeatureCollection(lakes.toList(10000))
     stack = ls.filterBounds(tile.geometry().centroid())
     out = stack.map(RefPull).flatten().filterMetadata('cScore_clouds','less_than',.5)
     dataOut = ee.batch.Export.table.toDrive(collection = out,\
@@ -84,9 +80,10 @@ for tiles in pr:
                                             folder = 'EE_TempPull',\
                                             fileFormat = 'csv',\
                                             selectors = ["system:index", "areakm", "cScore_clouds", "CLOUD_COVER", 'SPACECRAFT_ID', 'DATE_ACQUIRED', "distance", "lake_mix_layer_temperature", "lake_total_layer_temperature", "pCount_water", "site_id", "temp", "temp_qa"])
-    #Check how many existing tasks are running and take a break if it's >15
+    
+    ## Check how many existing tasks are running and take a break if it's >15
     maximum_no_of_tasks(25, 120)
-    #Send next task.
+    ## Send next task.
     dataOut.start()
     counter = counter + 1
     done.append(tiles)

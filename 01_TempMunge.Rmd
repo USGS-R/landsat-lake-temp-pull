@@ -20,7 +20,7 @@ library(ggpubr)
 library(Hmisc)
 library(Metrics)
 
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 ```{r eval = F, include = F}
@@ -104,7 +104,7 @@ matchups %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
   kableExtra::kable() %>%
   kableExtra::kable_styling()
   
-
+## One quick look at Era5, it's not great
 ggplot(matchups, aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
   scale_fill_viridis_c(trans = 'log10') +
   geom_smooth(method = 'lm') +
@@ -152,27 +152,9 @@ matchups_filt %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
   mutate(across(everything(), ~round(.,4))) %>%
   kableExtra::kable() %>%
   kableExtra::kable_styling()
-
-ggplot(matchups_filt, aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
-  scale_fill_viridis_c(trans = 'log10') +
-  geom_smooth(method = 'lm') +
-  stat_poly_eq(formula = y~x, 
-                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
-                parse = TRUE) +
-  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed')
-
-
-matchups_filt %>% filter(!is.na(temp_e5_mix)) %>%
-  summarise(rmse = rmse(wtemp_obs, temp_e5_mix),
-                       mae = mae(wtemp_obs,temp_e5_mix),
-                       smape = smape(wtemp_obs,temp_e5_mix),
-                       bias = bias(wtemp_obs, temp_e5_mix)) %>%
-  mutate(across(everything(), ~round(.,4))) %>%
-  kableExtra::kable() %>%
-  kableExtra::kable_styling()
 ```
 
-## Finally, just big lakes where we would expect to be most confident (distanct to shore \> 1000m)
+## Finally, just big lakes where we would expect to be most confident (distance to shore \> 1000m)
 
 ```{r}
 ggplot(matchups_filt %>% filter(distance > 1000), aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
@@ -202,6 +184,11 @@ matchups <- matchups %>% left_join(lake_data) %>%
          abs_error = abs(residual))
 
 ggplot(matchups, aes(x = residual, fill = sat)) +
+  geom_density(alpha = .4) +
+  geom_vline(aes(xintercept = 0), color = 'red') +
+  labs(title = 'Residuals across sensors')
+
+ggplot(matchups, aes(x = residual, fill = join)) +
   geom_density(alpha = .4) +
   geom_vline(aes(xintercept = 0), color = 'red') +
   labs(title = 'Residuals across sensors')
