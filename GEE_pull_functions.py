@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Google Earth Engine Reflectance Pull Functions
-Created on Mon Apr  9 14:24:13 2018
+
 @author: simontopp
 """
 import ee
@@ -10,7 +10,6 @@ import time
 import os
 
 ## Recreate the fmask based on Collection 2 Pixel QA band
-
 def AddFmask(image):
     qa = image.select('pixel_qa')
     water = qa.bitwiseAnd(1 << 7)
@@ -27,16 +26,8 @@ def AddFmask(image):
     return image.addBands(fmask)
 
 
-## Calculuate hillshadow to correct DWSE
-def CalcHillShadows(image, geo):
-    MergedDEM = ee.Image("users/eeProject/MERIT").clip(geo.buffer(3000))
-    hillShadow = (ee.Terrain.hillShadow(MergedDEM, ee.Number(image.get('SOLAR_AZIMUTH_ANGLE')),
-                                        ee.Number(90).subtract(image.get('SOLAR_ZENITH_ANGLE')), 30).rename(
-        ['hillShadow']))
-    return hillShadow
-
-
-## Buffer the lake sites
+## Buffer the lake sites either 120 minutes or the distance to shore, whichever
+## is smaller
 def dpBuff(i):
     dist = i.get('distance')
     buffdist = ee.Number(dist).min(120)
@@ -47,14 +38,13 @@ def dpBuff(i):
 def removeGeo(i):
     return i.setGeometry(None)
 
-        ## Create water mask and extract lake medians
 
 ## Set up the reflectance pull
 def RefPull(image):
     f = AddFmask(image).select('fmask')
     water = f.eq(1).rename('water')
     clouds = f.gte(2).rename('clouds')
-    #hs = CalcHillShadows(image, tile.geometry()).select('hillShadow')
+
     era5match = (era5.filterDate(ee.Date(image.get('system:time_start')).update(None, None, None, None, 0,0)))
 
     era5out = (ee.Algorithms.If(era5match.size(),

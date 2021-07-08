@@ -1,8 +1,6 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Created on Tue Feb 27 12:07:02 2018
-
 @author: simontopp
 """
 #%%
@@ -11,17 +9,18 @@ import ee
 import os
 #import pandas as pd
 #import feather
-import GEE_pull_functions as f
+
+## Initialize Earth Engine
 ee.Initialize()
 
-#Source necessary functions.
+#Source necessary functions. We do this instead of 'import' because of EE quirk.
 exec(open('GEE_pull_functions.py').read())
 
 #water = ee.Image("JRC/GSW1_1/GlobalSurfaceWater").select('occurrence').gt(80)
 
 ## Bring in EE Assets
-# Deepest point for CONUS Hydrolakes from Xiao Yang
-# Code available https://zenodo.org/record/4136755#.X5d54pNKgUE
+# Deepest point for CONUS PGDL Lakes
+# DP Code available at https://zenodo.org/record/4136755#.X5d54pNKgUE
 dp = (ee.FeatureCollection('users/sntopp/USGS/PGDL_lakes_deepest_point')
   .filterMetadata('distance', "greater_than", 60))
 
@@ -36,6 +35,7 @@ wrs = ee.FeatureCollection('users/sntopp/wrs2_asc_desc')\
     
 pr = wrs.aggregate_array('PR').getInfo()
 
+#Bring in temp data
 l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
 era5 = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
@@ -49,26 +49,27 @@ bns = ['temp','temp_qa','pixel_qa']
 ls7 = l7.select(bn57, bns)
 ls8 = l8.select(bn8, bns)
 
+##Do coarse cloud filtering
 ls = ee.ImageCollection(ls7.merge(ls8))\
     .filter(ee.Filter.lt('CLOUD_COVER', 50))\
     .filterBounds(us)  
 
 
 ## Set up a counter and a list to keep track of what's been done already
-counter = 0
-done = []    
+if not os.path.isfile('log.txt'):
+    open('log.txt', 'x')
 
-#%%
+done = open('log.txt', 'r')
+done = [x.strip() for x in done.readlines()]
+done = list(map(int, done))
+counter = len(done)
 
 ## In case something goofed, you should be able to just 
 ## re-run this chunk with the following line filtering out 
 ## what's already run. 
 pr = [i for i in pr if i not in done]
 
-if not os.path.isfile('log.txt'):
-    open('log.txt', 'x')
-
-for tiles in pr[0:1]:
+for tiles in pr:
     tile = wrs.filterMetadata('PR', 'equals', tiles)
     # For some reason we need to cast this to a list and back to a
     # feature collection
@@ -95,5 +96,5 @@ for tiles in pr[0:1]:
 
     print('done_' + str(counter) + '_' + str(tiles))
         
-#%%
+
 
