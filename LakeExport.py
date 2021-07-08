@@ -30,7 +30,7 @@ wrs = ee.FeatureCollection('users/sntopp/wrs2_asc_desc')\
     .filterBounds(us)\
     .filterMetadata('MODE', 'equals', 'D')
 
-## Run everything by path/row to speed up computation in EE.    
+## Run everything by path/row to speed up computation in EE    
 pr = wrs.aggregate_array('PR').getInfo()
 
 ## Bring in temp data
@@ -38,8 +38,7 @@ l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
 era5 = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
 
-## Standardize band names between the various collections and aggregate 
-## them into one image collection
+## Standardize band names between the various collections 
 bn8 = ['ST_B10', 'ST_QA', 'QA_PIXEL']
 bn57 = ['ST_B6', 'ST_QA', 'QA_PIXEL']
 bns = ['temp','temp_qa','pixel_qa']
@@ -47,7 +46,8 @@ bns = ['temp','temp_qa','pixel_qa']
 ls7 = l7.select(bn57, bns)
 ls8 = l8.select(bn8, bns)
 
-## Do coarse cloud filtering
+## Do coarse cloud filtering and aggregate 
+## them into one image collection
 ls = ee.ImageCollection(ls7.merge(ls8))\
     .filter(ee.Filter.lt('CLOUD_COVER', 50))\
     .filterBounds(us)  
