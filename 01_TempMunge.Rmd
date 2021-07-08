@@ -1,0 +1,242 @@
+---
+title: "01_TempMunge"
+author: "Simon Topp"
+date: "07/08/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(purrr)
+library(furrr)
+library(data.table)
+library(feather)
+library(sf)
+library(ggpmisc)
+library(ggpubr)
+library(Hmisc)
+library(Metrics)
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r eval = F, include = F}
+## Read in whatever path you saved the raw pull data to
+files <- list.files('data/EE_TempPull', full.names = T)
+files <- files[file.size(files) > 1] ## 6 WRS tile returned no values
+
+## Munge it a little, basically zero clouds/shadow/ice and
+## at least 5 pixels
+munger <- function(file){
+  df <- read_csv(file) %>%
+    filter(!is.na(temp),
+           cScore_clouds == 0,
+           pCount_water > 5) %>%
+  select(-`system:index`)
+  return(df)
+}
+
+munged <- files %>% map_dfr(munger)
+
+munged <- munged %>% mutate(temp = 0.00341802*temp + 149 - 273.15,
+                                  temp_qa = temp_qa*0.01,
+                                  lake_mix_layer_temperature = lake_mix_layer_temperature - 273.15) %>%
+  rename(temp_e5_mix = lake_mix_layer_temperature, temp_e5_full = lake_total_layer_temperature, 
+         temp_ls = temp, temp_ls_qa = temp_qa, date = DATE_ACQUIRED, sat = SPACECRAFT_ID, 
+         scene_cloud_cover = CLOUD_COVER)
+
+write_feather(munged,'data/out/landsat_temps.feather')
+```
+
+```{r}
+munged <- read_feather('data/out/landsat_temps.feather')
+```
+
+## Between Landsat 7 and 8 we have `r nrow(munged)` temperature observations.
+
+```{r}
+
+obs <- read_csv('data/in/lake_surface_temp_obs.csv') %>%
+  rename(date = Date)
+
+same_day <- obs %>% inner_join(munged) %>% mutate(join = 'same_day')
+
+day_plus_one <- obs %>% inner_join(munged %>% mutate(date = date + 1)) %>% mutate(join = 'day_plus_1')
+
+day_minus_one <- obs %>% inner_join(munged %>% mutate(date = date -1)) %>% mutate(join = 'day_minus_1')
+
+matchups <- bind_rows(same_day, day_plus_one, day_minus_one)
+
+matchups_filt <- matchups %>%
+  filter(temp_ls_qa < 3,
+         scene_cloud_cover < 20,
+         distance > 90,
+         temp_ls >=0)
+
+rm(same_day, day_plus_one, day_minus_one)
+```
+
+## Of those, we have `r nrow(matchups)` coincident observations of RS and *in situ* temp (matchups).
+
+Let's look at some *inclusive* metrics. General filters here are:
+
+-   +/- 1 day matchups
+
+-   0 clouds/ice/cloud shadow over the 'deepest point'
+
+```{r}
+ggplot(matchups, aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm') +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Landsat Temps', title = 'Landsat and Observed')
+
+matchups %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
+                       mae = mae(wtemp_obs,temp_ls),
+                       smape = smape(wtemp_obs,temp_ls),
+                       bias = bias(wtemp_obs, temp_ls)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+  
+
+ggplot(matchups, aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm') +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed')
+
+
+matchups %>% filter(!is.na(temp_e5_mix)) %>%
+  summarise(rmse = rmse(wtemp_obs, temp_e5_mix),
+                       mae = mae(wtemp_obs,temp_e5_mix),
+                       smape = smape(wtemp_obs,temp_e5_mix),
+                       bias = bias(wtemp_obs, temp_e5_mix)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+```
+
+## Now the same but with *strict* filters. After qc filters we have `r nrow(matchups_filt)` matchups.
+
+General filters here are:
+
+-   +/- 1 day matchups
+
+-   0 clouds/ice/cloud shadow over the 'deepest point'
+
+-   Landsat uncertainty \< 3 degrees
+
+-   Scene cloud cover \< 20% - Distance to shore \> 90m
+
+```{r}
+ggplot(matchups_filt, aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm') +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Landsat Temps', title = 'Landsat and Observed')
+
+matchups_filt %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
+                       mae = mae(wtemp_obs,temp_ls),
+                       smape = smape(wtemp_obs,temp_ls),
+                       bias = bias(wtemp_obs, temp_ls)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+
+ggplot(matchups_filt, aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm') +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed')
+
+
+matchups_filt %>% filter(!is.na(temp_e5_mix)) %>%
+  summarise(rmse = rmse(wtemp_obs, temp_e5_mix),
+                       mae = mae(wtemp_obs,temp_e5_mix),
+                       smape = smape(wtemp_obs,temp_e5_mix),
+                       bias = bias(wtemp_obs, temp_e5_mix)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+```
+
+## Finally, just big lakes where we would expect to be most confident (distanct to shore \> 1000m)
+
+```{r}
+ggplot(matchups_filt %>% filter(distance > 1000), aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm') +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Landsat Temps', title = 'Landsat and Observed')
+
+matchups_filt %>% filter(distance > 1000) %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
+                       mae = mae(wtemp_obs,temp_ls),
+                       smape = smape(wtemp_obs,temp_ls),
+                       bias = bias(wtemp_obs, temp_ls)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+```
+
+## Sliced and diced a couple ways
+
+```{r}
+lake_data <- read_csv('data/in/lake_metadata.csv')
+
+matchups <- matchups %>% left_join(lake_data) %>% 
+  mutate(residual = wtemp_obs - temp_ls,
+         abs_error = abs(residual))
+
+ggplot(matchups, aes(x = residual, fill = sat)) +
+  geom_density(alpha = .4) +
+  geom_vline(aes(xintercept = 0), color = 'red') +
+  labs(title = 'Residuals across sensors')
+
+matchups %>%
+  mutate(dist_group = cut_number(distance, 6)) %>%
+  ggplot(aes(x = dist_group, y = residual)) +
+  geom_violin(draw_quantiles = .5) +
+  labs(title = 'Residuals binned by distance to shore')
+
+
+## Spatially
+matchups.sf <- matchups %>% st_as_sf(coords = c('lake_lon_deg','lake_lat_deg'), crs = 4326) %>% st_transform(5070)
+
+usa <- maps::map('usa', plot = F) %>% st_as_sf() %>% st_transform(5070) 
+
+grid <- st_make_grid(usa, cellsize = c(200000,200000), square = F) %>% st_as_sf() %>% mutate(ID = row_number())
+
+rmse.sf <- matchups.sf %>% st_join(grid) %>% st_set_geometry(NULL) %>%
+  group_by(ID) %>%
+  summarise(rmse = rmse(wtemp_obs, temp_ls),
+            matchup.count = n()) %>%
+  inner_join(grid) %>%
+  st_as_sf() 
+
+ggplot(rmse.sf) + geom_sf(aes(fill = rmse)) +
+  scale_fill_viridis_c() +
+  geom_sf(data = usa, fill = 'transparent', color = 'black') +
+  theme_minimal() +
+  labs(title = 'Spatial Error Distribution')
+
+ggplot(rmse.sf) + geom_sf(aes(fill = matchup.count)) +
+  scale_fill_viridis_c(trans='log10') +
+  geom_sf(data = usa, fill = 'transparent', color = 'black') +
+  theme_minimal() +
+  labs(title = 'Matchup Count')
+
+```
