@@ -35,6 +35,7 @@ munger <- function(file){
     filter(!is.na(temp),
            cScore_clouds == 0,
            pCount_water > 5) %>%
+    mutate(LandsatID = map_chr(`system:index`, ~str_split(.,'_0000')[[1]][1])) %>%
   select(-`system:index`)
   return(df)
 }
@@ -58,7 +59,6 @@ munged <- read_feather('data/out/landsat_temps.feather')
 ## Between Landsat 7 and 8 we have `r nrow(munged)` temperature observations.
 
 ```{r}
-
 obs <- read_csv('data/in/lake_surface_temp_obs.csv') %>%
   rename(date = Date)
 
@@ -68,7 +68,10 @@ day_plus_one <- obs %>% inner_join(munged %>% mutate(date = date + 1)) %>% mutat
 
 day_minus_one <- obs %>% inner_join(munged %>% mutate(date = date -1)) %>% mutate(join = 'day_minus_1')
 
-matchups <- bind_rows(same_day, day_plus_one, day_minus_one)
+matchups <- bind_rows(same_day, day_plus_one, day_minus_one) %>%
+  mutate(resid = wtemp_obs - temp_ls,
+         abs_error = abs(resid),
+         e5_flag = abs(wtemp_obs - temp_e5_mix))
 
 matchups_filt <- matchups %>%
   filter(temp_ls_qa < 3,
@@ -107,11 +110,12 @@ matchups %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
 ## One quick look at Era5, it's not great
 ggplot(matchups, aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
   scale_fill_viridis_c(trans = 'log10') +
-  geom_smooth(method = 'lm') +
+  geom_smooth(method = 'lm', aes(color = 'Best Fit')) +
+  geom_abline(aes(slope=1, intercept=0,color = '1:1')) +
   stat_poly_eq(formula = y~x, 
                 aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
                 parse = TRUE) +
-  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed')
+  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed', titel='blue=Best Fit', 'Red=1:1')
 
 
 matchups %>% filter(!is.na(temp_e5_mix)) %>%
@@ -137,6 +141,42 @@ General filters here are:
 -   Scene cloud cover \< 20% - Distance to shore \> 90m
 
 ```{r}
+matchups_filt <- matchups %>%
+  filter(temp_ls_qa < 3,
+         scene_cloud_cover < 10,
+         distance > 200,
+         temp_ls >=0,
+         wtemp_obs >=0,
+         e5_flag < 5,
+         join != 'day_minus_1'
+         )
+
+plotter <- function(var){
+  matchups %>%
+    mutate(bins= cut_number(get(var), 5)) %>%
+    ggplot(aes(x = bins, y = abs_error)) +
+    geom_violin(draw_quantiles = c(.25,.5,.75)) +
+    geom_hline(aes(yintercept = 0), color = 'red')+
+    labs(x = var)
+}
+
+plotter('areakm')
+plotter('scene_cloud_cover')
+plotter('e5_flag')
+plotter('distance')
+plotter('temp_ls_qa')
+
+matchups_filt <- matchups %>%
+  filter(areakm > .2,
+         temp_ls_qa < 3,
+         scene_cloud_cover < 20,
+         distance > 250,
+         temp_ls >= 0,
+         wtemp_obs >=0,
+         e5_flag < 5,
+         join != 'day_minus_1'
+         )
+
 ggplot(matchups_filt, aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
   scale_fill_viridis_c(trans = 'log10') +
   geom_smooth(method = 'lm') +
@@ -150,14 +190,15 @@ matchups_filt %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
                        smape = smape(wtemp_obs,temp_ls),
                        bias = bias(wtemp_obs, temp_ls)) %>%
   mutate(across(everything(), ~round(.,4))) %>%
-  kableExtra::kable() %>%
-  kableExtra::kable_styling()
+  kableExtra::kable() 
+
+check <- matchups_filt %>% mutate(se = (wtemp_obs - temp_ls)^2)
 ```
 
 ## Finally, just big lakes where we would expect to be most confident (distance to shore \> 1000m)
 
 ```{r}
-ggplot(matchups_filt %>% filter(distance > 1000), aes(x = wtemp_obs, y = temp_ls)) + geom_hex() +
+ggplot(matchups_filt %>% filter(distance > 1000), aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
   scale_fill_viridis_c(trans = 'log10') +
   geom_smooth(method = 'lm') +
   stat_poly_eq(formula = y~x, 
@@ -165,10 +206,11 @@ ggplot(matchups_filt %>% filter(distance > 1000), aes(x = wtemp_obs, y = temp_ls
                 parse = TRUE) +
   labs(x = 'Observed Temps', y = 'Landsat Temps', title = 'Landsat and Observed')
 
-matchups_filt %>% filter(distance > 1000) %>% summarise(rmse = rmse(wtemp_obs, temp_ls),
-                       mae = mae(wtemp_obs,temp_ls),
-                       smape = smape(wtemp_obs,temp_ls),
-                       bias = bias(wtemp_obs, temp_ls)) %>%
+matchups_filt %>% filter(distance > 1000) %>%
+  summarise(rmse = rmse(wtemp_obs, temp_ls),
+                   mae = mae(wtemp_obs,temp_ls),
+                   smape = smape(wtemp_obs,temp_ls),
+                   bias = bias(wtemp_obs, temp_ls)) %>%
   mutate(across(everything(), ~round(.,4))) %>%
   kableExtra::kable() %>%
   kableExtra::kable_styling()
@@ -227,3 +269,91 @@ ggplot(rmse.sf) + geom_sf(aes(fill = matchup.count)) +
   labs(title = 'Matchup Count')
 
 ```
+
+## Take a look at within scene variance.
+```{r}
+summary_in <- matchups_filt
+
+scene_sd <- summary_in %>% group_by(LandsatID) %>%
+  summarise(count = n(),
+            resid_sd = sd(resid)) %>%
+  filter(count >5)
+
+overall_sd <- summary_in %>% filter(LandsatID %in% scene_sd$LandsatID) %>%
+  summarise(overall = sd(resid)) %>% .[[1]]
+
+ggplot(scene_sd, aes(x = resid_sd)) + geom_histogram() + geom_vline(aes(xintercept = overall_sd, color = 'Overall residual SD'))
+
+scene_counts <- dplyr::count(summary_in, LandsatID) %>% filter(n > 5)
+
+scene_bias <- summary_in %>% 
+  filter(LandsatID %in% scene_counts$LandsatID) %>%
+  group_by(LandsatID) %>%
+  summarise(bias = bias(wtemp_obs, temp_ls))
+
+scene_stats <- summary_in %>% 
+  filter(LandsatID %in% scene_counts$LandsatID) %>%
+  left_join(scene_bias) %>%
+  mutate(temp_no_bias = temp_ls+bias) %>%
+  group_by(LandsatID) %>%
+  summarise(rmse_bias_removed = rmse(wtemp_obs, temp_no_bias),
+            scene_bias = mean(bias))
+
+overall_bias = summary_in %>% filter(LandsatID %in% scene_counts$LandsatID) %>%
+  summarise(bias = bias(wtemp_obs, temp_ls)) %>%
+  .[[1]]
+
+overall_rmse = summary_in %>% filter(LandsatID %in% scene_counts$LandsatID) %>%
+  mutate(temp_ls = temp_ls + overall_bias) %>%
+  summarise(rmse = rmse(wtemp_obs,temp_ls))
+rmses <- tibble(overall_rmse_bias_removed = overall_rmse[[1]], median_scene_rmse_bias_removed = median(scene_stats$rmse_bias_removed)) %>%
+  pivot_longer(everything(), names_to = "RMSE_Summaries")
+
+ggplot(scene_stats, aes(x = rmse_bias_removed)) + geom_histogram() + 
+  geom_vline(data = rmses, aes(xintercept = value, color = RMSE_Summaries)) +
+  labs(x = "Distribution of image specific rmse after removing image bias")
+```
+
+
+```{r}
+mendota <- read_csv('data/in/Mendota_Era5Land_1984_2021.csv') 
+mendotaObs <- obs %>% filter(site_id == "nhdhr_143249470")
+
+mendota <- mendota %>% mutate(lake_mix_layer_temperature = lake_mix_layer_temperature - 273.15,
+                              date = as.Date(date)) %>%
+  inner_join(mendotaObs)
+
+library(plotly)
+
+ggplotly(
+  ggplot(mendota, aes(x=date)) +
+    geom_point(aes(y = lake_mix_layer_temperature, color='Era5')) +
+    geom_point(aes(y=wtemp_obs, color = 'Obs')) +
+    geom_line(aes(y = lake_mix_layer_temperature, color='Era5')) +
+    geom_line(aes(y=wtemp_obs, color = 'Obs')))
+
+ggplot(mendota, aes(x=lake_mix_layer_temperature)) + geom_histogram()
+
+ggplot
+
+
+mendota %>% rename(temp_e5_mix = lake_mix_layer_temperature) %>%
+  summarise(rmse = rmse(wtemp_obs, temp_e5_mix),
+                       mae = mae(wtemp_obs,temp_e5_mix),
+                       smape = smape(wtemp_obs,temp_e5_mix),
+                       bias = bias(wtemp_obs, temp_e5_mix)) %>%
+  mutate(across(everything(), ~round(.,4))) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+
+mendota %>% rename(temp_e5_mix = lake_mix_layer_temperature) %>%
+ggplot(.,aes(x = wtemp_obs, y = temp_e5_mix)) + geom_hex() +
+  scale_fill_viridis_c(trans = 'log10') +
+  geom_smooth(method = 'lm', aes(color = 'Best Fit')) +
+  geom_abline(aes(slope=1, intercept=0,color = '1:1')) +
+  stat_poly_eq(formula = y~x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+  labs(x = 'Observed Temps', y = 'Era5 Mixed Layer Temps', 'Era5 and Observed', titel='blue=Best Fit', 'Red=1:1')
+```
+
