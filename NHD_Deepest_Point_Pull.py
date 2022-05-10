@@ -1,23 +1,15 @@
 import ee
 import math
+import time
 ee.Initialize()
 
 ## Deepest point calculation adapted from Xiao Yang
 ### https: // doi.org / 10.5281 / zenodo.4136754
-#
-# table_filt = nhdhr.filter(ee.Filter.gte('AREASQK', .01))
-# print(table_filt.size())
-# print(table_filt)
-#
-# Map.addLayer(nhdhr)
-# // Map.centerObject(fail_point, 12)
-# // print(blah)
-
-
+### Functions
 def get_scale(polygon):
-    radius = polygon.get('areasqkm').getInfo()
+    radius = polygon.get('areasqkm')
     radius = ee.Number(radius).divide(math.pi).sqrt().multiply(1000)
-    return radius.divide(7)
+    return radius.divide(20)
 
 
 def getUTMProj(lon, lat):
@@ -69,33 +61,52 @@ def GetLakeCenters(polygon):
         tileScale=1,
         geometries=True)
 
-    return (ee.Feature(output.first()).copyProperties(polygon))
+    return (ee.Feature(output.first()).copyProperties(polygon,['permanent','areasqkm']))
+
+def buff_dp(dp):
+    return dp.buffer(dp.getNumber('distance'))
+
+
+def maximum_no_of_tasks(MaxNActive, waitingPeriod):
+    ## maintain a maximum number of active tasks
+    time.sleep(10)
+    ## initialize submitting jobs
+    ts = list(ee.batch.Task.list())
+
+    NActive = 0
+    for task in ts:
+        if ('RUNNING' in str(task) or 'READY' in str(task)):
+            NActive += 1
+    ## wait if the number of current active tasks reach the maximum number
+    ## defined in MaxNActive
+    while (NActive >= MaxNActive):
+        time.sleep(waitingPeriod)
+        ts = list(ee.batch.Task.list())
+        NActive = 0
+        for task in ts:
+            if ('RUNNING' in str(task) or 'READY' in str(task)):
+                NActive += 1
+    return ()
+
 
 assets_parent = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/projects/sat-io/open-datasets/NHD'})['assets']
-
-
-assets_state =  (ee.FeatureCollection(f"{assets_parent[1]['id']}/NHDWaterbody")
+assets_parent = assets_parent[0:2]
+for i in range(len(assets_parent)):
+    state_asset = assets_parent[i]['id']
+    assets_state = (ee.FeatureCollection(f"{state_asset}/NHDWaterbody")
     .filter(ee.Filter.gte('areasqkm',0.0001))
     .filter(ee.Filter.inList('ftype',[361,436,390])))
 
-dp = GetLakeCenters(ee.Feature(assets_state.first()))
+    dp = ee.FeatureCollection(assets_state).map(GetLakeCenters)
 
-dp_buff = test.map(function(f)
-{
-return (f.buffer(f.getNumber('distance')))})
+    dataOut = ee.batch.Export.table.toAsset(collection=dp,description=state_asset.split('/')[-1],assetId=f"projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint/{state_asset.split('/')[-1]}")
 
-var
+    ## Check how many existing tasks are running and take a break if it's >15
+    maximum_no_of_tasks(10, 240)
+    ## Send next task.
+    dataOut.start()
+    print(state_asset.split('/')[-1])
 
-
-colorDp = {color: 'cyan'}
-Map.addLayer(nhdhr.filterBounds(geometry))
-Map.addLayer(dp_buff, colorDp, 'DpBuffer', true, 0.5)
-Map.addLayer(test, colorDp, 'Deepest Point', true)
-Map.centerObject(geometry)
-
-var
-dp_out = nhdhr.filter(ee.Filter.gte('AREASQK', 0.001))
-    .filter(ee.Filter.lt('AREASQK', 0.01)).map(GetLakeCenters)
-Export.table.toAsset(dp_out, 'USGS/NHD_hr_dp_f361_436_390_gt1hectare')
+#f"projects/earthengine-legacy/assets/users/sntopp/NHD/{state_asset.split('/')[-1]}/NHDDeepestPoint"
 
 
