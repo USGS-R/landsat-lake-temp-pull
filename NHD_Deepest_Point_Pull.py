@@ -90,11 +90,11 @@ def maximum_no_of_tasks(MaxNActive, waitingPeriod):
 
 
 assets_parent = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/projects/sat-io/open-datasets/NHD'})['assets']
-assets_parent = assets_parent[0:2]
+##assets_parent = assets_parent[5:15]
 for i in range(len(assets_parent)):
     state_asset = assets_parent[i]['id']
     assets_state = (ee.FeatureCollection(f"{state_asset}/NHDWaterbody")
-    .filter(ee.Filter.gte('areasqkm',0.0001))
+    .filter(ee.Filter.gte('areasqkm',0.001))
     .filter(ee.Filter.inList('ftype',[361,436,390])))
 
     dp = ee.FeatureCollection(assets_state).map(GetLakeCenters)
@@ -102,7 +102,7 @@ for i in range(len(assets_parent)):
     dataOut = ee.batch.Export.table.toAsset(collection=dp,description=state_asset.split('/')[-1],assetId=f"projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint/{state_asset.split('/')[-1]}")
 
     ## Check how many existing tasks are running and take a break if it's >15
-    maximum_no_of_tasks(10, 240)
+    maximum_no_of_tasks(15, 240)
     ## Send next task.
     dataOut.start()
     print(state_asset.split('/')[-1])
