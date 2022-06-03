@@ -9,7 +9,10 @@ ee.Initialize()
 def get_scale(polygon):
     radius = polygon.get('areasqkm')
     radius = ee.Number(radius).divide(math.pi).sqrt().multiply(1000)
-    return radius.divide(20)
+    scale = radius.divide(20)
+    scale = ee.Algorithms.If(ee.Number(scale).lte(10),10,scale)
+    scale = ee.Algorithms.If(ee.Number(scale).gte(500),500,scale)
+    return ee.Number(scale)
 
 
 def getUTMProj(lon, lat):
@@ -88,13 +91,17 @@ def maximum_no_of_tasks(MaxNActive, waitingPeriod):
                 NActive += 1
     return ()
 
-
+assets_done = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint'})['assets']
+ids_done = [i['id'].split('/')[-1] for i in assets_done]
 assets_parent = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/projects/sat-io/open-datasets/NHD'})['assets']
-##assets_parent = assets_parent[5:15]
+assets_parent = [i for i in assets_parent if i['id'].split('/')[-1] not in ids_done]
+
+
 for i in range(len(assets_parent)):
     state_asset = assets_parent[i]['id']
     assets_state = (ee.FeatureCollection(f"{state_asset}/NHDWaterbody")
     .filter(ee.Filter.gte('areasqkm',0.001))
+    .filter(ee.Filter.lte('areasqkm',5000))  #Remove Great Lakes
     .filter(ee.Filter.inList('ftype',[361,436,390])))
 
     dp = ee.FeatureCollection(assets_state).map(GetLakeCenters)
