@@ -10,7 +10,7 @@ def get_scale(polygon):
     radius = polygon.get('areasqkm')
     radius = ee.Number(radius).divide(math.pi).sqrt().multiply(1000)
     scale = radius.divide(20)
-    scale = ee.Algorithms.If(ee.Number(scale).lte(10),10,scale)
+    #scale = ee.Algorithms.If(ee.Number(scale).lte(10),10,scale)
     scale = ee.Algorithms.If(ee.Number(scale).gte(500),500,scale)
     return ee.Number(scale)
 
@@ -91,10 +91,14 @@ def maximum_no_of_tasks(MaxNActive, waitingPeriod):
                 NActive += 1
     return ()
 
+def calc_area(feature):
+    return(feature.set('area_calc',feature.area().divide(1e6)))
+
 assets_done = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint'})['assets']
 ids_done = [i['id'].split('/')[-1] for i in assets_done]
 assets_parent = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/projects/sat-io/open-datasets/NHD'})['assets']
 assets_parent = [i for i in assets_parent if i['id'].split('/')[-1] not in ids_done]
+#assets_parent = [i for i in assets_parent if i['id'].split('/')[-1] not in ['NHD_MO','NHD_TX','NHD_AK']]
 
 
 for i in range(len(assets_parent)):
@@ -104,7 +108,10 @@ for i in range(len(assets_parent)):
     .filter(ee.Filter.lte('areasqkm',5000))  #Remove Great Lakes
     .filter(ee.Filter.inList('ftype',[361,436,390])))
 
-    dp = ee.FeatureCollection(assets_state).map(GetLakeCenters)
+    ## Added to trouble shoot NM where some of the NHD areas are don't match the actual polygon areas
+    assets_state=ee.FeatureCollection(assets_state.map(calc_area)).filter(ee.Filter.gte('area_calc',0.001))
+
+    dp = assets_state.map(GetLakeCenters)
 
     dataOut = ee.batch.Export.table.toAsset(collection=dp,description=state_asset.split('/')[-1],assetId=f"projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint/{state_asset.split('/')[-1]}")
 
