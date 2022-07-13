@@ -48,7 +48,7 @@ def GetLakeCenters(polygon):
         scale=scale,
         bestEffort=True,
         tileScale=1
-    ).getNumber('distance'))
+    ).getNumber('distance').int16())
 
     outputDp = (ee.Feature(dist.addBands(ee.Image.pixelLonLat()).updateMask(dist.gte(maxDistance))
                           .sample(geo, scale).first()))
@@ -124,3 +124,11 @@ for i in range(len(assets_parent)):
 #f"projects/earthengine-legacy/assets/users/sntopp/NHD/{state_asset.split('/')[-1]}/NHDDeepestPoint"
 
 
+state_dps = ee.data.listAssets({'parent': 'projects/earthengine-legacy/assets/users/sntopp/NHD/DeepestPoint'})['assets']
+
+for i in state_dps:
+    dps = ee.FeatureCollection(i['id'])
+    id =  i['id'].split('/')[-1]
+    dpsOut = ee.batch.Export.table.toDrive(dps,id,'EE_DP_Exports',id)
+    maximum_no_of_tasks(15, 60)
+    dpsOut.start()
