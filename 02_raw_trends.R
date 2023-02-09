@@ -115,11 +115,21 @@ trends_sf %>%
         legend.position = 'none') +
   labs(x = 'Lake Size Bin (km2)', y = 'Trend (°C/yr)') 
 
+### Look at actual timeseries to see if they look really goofy
 seasonal_summary <- seasonally_aggregated %>%
-  group_by(season, site_id) %>%
+  ungroup() %>%
+  mutate(area_bin = cut_number(areakm, 10)) %>%
+  group_by(season, site_id, area_bin) %>%
   mutate(temp_scaled = scale(temp_ls)) %>%
   ungroup() %>%
-  group_by(season, year) %>%
+  group_by(season, year, area_bin) %>%
   summarise(mean_temp= mean(temp_scaled),
             sd=sd(temp_scaled))
+
+### 
+ggplot(seasonal_summary, aes(x=year, y = mean_temp, color = area_bin, fill = area_bin)) +
+  geom_ribbon(aes(ymin = mean_temp-sd, ymax=mean_temp+sd), alpha = .3) +
+  geom_line() +
+  facet_wrap(~season)
+
 
